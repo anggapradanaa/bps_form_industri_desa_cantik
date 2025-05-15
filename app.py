@@ -36,18 +36,14 @@ def connect_to_gsheet():
             # Sebagai alternatif, coba cari file kredensial di direktori tertentu
             credentials_path = r"D:\Perkuliahan\PRIGEL\Form Pendataan Desa Cantik\pendataan-industri-kejambon-a89a18e029b6.json"
 
-            credentials_found = False
-            for cred_path in cred_paths:
-                if os.path.exists(cred_path):
-                    st.info(f"Menggunakan kredensial dari file: {cred_path}")
-                    credentials = Credentials.from_service_account_file(
-                        cred_path,
-                        scopes=scope
-                    )
-                    credentials_found = True
-                    break
-            
-            if not credentials_found:
+            # Periksa apakah file kredensial ada
+            if os.path.exists(credentials_path):
+                st.info(f"Menggunakan kredensial dari file: {credentials_path}")
+                credentials = Credentials.from_service_account_file(
+                    credentials_path,
+                    scopes=scope
+                )
+            else:
                 st.error("Tidak dapat menemukan file kredensial Google Cloud. Pastikan Anda telah menempatkan file credentials.json di direktori yang benar.")
                 return None
         
@@ -82,7 +78,7 @@ def connect_to_gsheet():
     except Exception as e:
         st.error(f"Terjadi kesalahan dalam koneksi ke Google Sheets: {str(e)}")
         return None
-
+        
 # Fungsi untuk membuat PDF yang sudah diperbaiki
 def create_pdf(form_data, usaha_data):
     buffer = io.BytesIO()
