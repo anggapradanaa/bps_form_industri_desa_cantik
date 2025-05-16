@@ -578,4 +578,18 @@ with st.expander("Petunjuk Penggunaan"):
     3. **BLOK IV**: Tentukan jumlah usaha yang akan didata.
     4. **Data Usaha**: Isi detail untuk setiap usaha satu per satu.
     5. **Preview**: Periksa semua data yang telah diisi.
-    6. **Simpan & Unduh**: Simpan data ke Google Sheets dan unduh formulir sebagai PDF)""")
+    6. **Simpan & Unduh**: Simpan data ke Google Sheets dan unduh formulir sebagai PDF)
+                
+    ### Keterangan
+    1.  Industri adalah kegiatan produksi yang mengubah barang dasar (bahan mentah menjadi barang jadi/setengah jadi dan atau dari barang yang kurang nilainya menjadi barang yang lebih tinggi nilainya. Termasuk ke dalam kategori ini adalah kegiatan jasa industri (maklun).              
+    2.  Industri Mikro adalah perusahaan industri yang pekerjanya antara 1-4 orang termasuk pemilik usaha.
+    3.  Industri Kecil adalah perusahaan industri yang pekerjanya antara 5-19 orang termasuk pemilik usaha. 
+    4.  Usaha/perusahaan industri skala menengah (sedang) adalah perusahaan yang memenuhi salah satu kriteria jumlah tenaga 20 sampai 99 orang atau nilai akumulasi investasi/modal tetap sejak pendirian pabrik hingga 31 Desember 2024 lebih dari 5 miliar dan kurang dari Rp 10 miliar atau omset perusahaan tahun 2024 lebih dari 15 miliar dan kurang dari Rp 50 miliar.                        
+    5.  Jumlah tenaga kerja termasuk pemilik usaha.
+    6.  Contoh industri makanan : membuat tempe, tahu, keripik, peyek, kue, roti dll.
+    7.  Contoh industri alat rumah tangga : membuat Panci, cetakan kue, centong dll.
+    8.  Contoh industri material bahan bangunan : membuat batu bata, batako, kluwung dll.
+    9.  Contoh industri alat pertanian: membuat cangkul, sabit, dll.
+    10. Contoh industri kerajinan selain logam: membuat mebel, lemari, kusen, dll.
+    11. Contoh industri logam: membuat mur, baut, mesin bubut, spare part mesin, teralis, perbaikan mesin (bukan bengkel motor/mobil), dll.
+    12. Industri lainnya: membaki, menjahit sesuai pesanan, mencetak undangan, sablon, dll.""")
