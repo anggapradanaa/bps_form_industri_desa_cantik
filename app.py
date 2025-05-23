@@ -1,16 +1,17 @@
-import streamlit as st
-import pandas as pd
-import gspread
-from google.oauth2.service_account import Credentials
-from datetime import date
-import base64
-import io
 import os
+import io
 import json
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.platypus import Table, TableStyle
+import base64
+import pandas as pd
+import streamlit as st
+import gspread
+from datetime import date
+from google.oauth2.service_account import Credentials
 from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Table, TableStyle, Paragraph
 
 # Judul dan konfigurasi halaman
 st.set_page_config(page_title="Formulir Pendataan Industri Pengolahan", layout="wide")
@@ -32,18 +33,28 @@ def connect_to_gsheet():
                 st.secrets["gcp_service_account"],
                 scopes=scope
             )
+            st.success("Berhasil menggunakan kredensial dari secrets.")
         else:
-            # Sebagai alternatif, coba cari file kredensial di direktori tertentu
-            credentials_path = r"D:\Perkuliahan\PRIGEL\Form Pendataan Desa Cantik\pendataan-industri-kejambon-a89a18e029b6.json"
+            # Definisikan path kredensial yang mungkin
+            cred_paths = [
+                r"D:\Perkuliahan\PRIGEL\Form Pendataan Desa Cantik\brave-reason-460003-d0-af9a852a98c9.json",
+                # Tambahkan path alternatif lain jika ada
+                "credentials.json",  # Untuk path relatif di direktori yang sama
+                os.path.join(os.path.expanduser("~"), "credentials.json")  # Di home directory
+            ]
 
-            # Periksa apakah file kredensial ada
-            if os.path.exists(credentials_path):
-                st.info(f"Menggunakan kredensial dari file: {credentials_path}")
-                credentials = Credentials.from_service_account_file(
-                    credentials_path,
-                    scopes=scope
-                )
-            else:
+            credentials_found = False
+            for cred_path in cred_paths:
+                if os.path.exists(cred_path):
+                    st.info(f"Menggunakan kredensial dari file: {cred_path}")
+                    credentials = Credentials.from_service_account_file(
+                        cred_path,
+                        scopes=scope
+                    )
+                    credentials_found = True
+                    break
+            
+            if not credentials_found:
                 st.error("Tidak dapat menemukan file kredensial Google Cloud. Pastikan Anda telah menempatkan file credentials.json di direktori yang benar.")
                 return None
         
@@ -51,24 +62,48 @@ def connect_to_gsheet():
         client = gspread.authorize(credentials)
         
         # Buka spreadsheet dengan ID
-        spreadsheet_id = '1S7wBO23LVV1dK6MsgxuQO2It7P2Lh45LUiaFZoIshcU'  
-        spreadsheet = client.open_by_key(spreadsheet_id)
+        spreadsheet_id = '1bb8_rTHLUKANZyi30FGRZO5vl44siHheV2AaFomH-D4'  
+        
+        try:
+            spreadsheet = client.open_by_key(spreadsheet_id)
+        except gspread.exceptions.SpreadsheetNotFound:
+            st.error(f"Spreadsheet dengan ID {spreadsheet_id} tidak ditemukan. Periksa ID dan pastikan kredensial memiliki akses.")
+            return None
+        except gspread.exceptions.APIError as e:
+            if "quota" in str(e).lower():
+                st.error("Kuota Google Sheets API terlampaui. Coba lagi nanti.")
+            else:
+                st.error(f"Error API Google Sheets: {e}")
+            return None
         
         # Coba dapatkan worksheet, jika tidak ada, buat baru
         try:
             worksheet = spreadsheet.worksheet("Data Industri")
+            
+            # Periksa jumlah baris yang sudah ada
+            try:
+                all_values = worksheet.get_all_values()
+                current_rows = len(all_values)
+                if current_rows > 900:  # Warning jika mendekati batas
+                    st.warning(f"Perhatian: Sheet sudah berisi {current_rows} baris data dari 1000 baris. Pertimbangkan untuk membuat sheet baru.")
+            except:
+                pass  # Jika gagal mendapatkan jumlah baris, lanjutkan saja
+                
         except gspread.exceptions.WorksheetNotFound:
             # Worksheet tidak ditemukan, buat baru
-            worksheet = spreadsheet.add_worksheet(title="Data Industri", rows=1000, cols=20)
+            worksheet = spreadsheet.add_worksheet(title="Data Industri", rows=1000, cols=30)
             
             # Tambahkan header
             headers = [
                 "Provinsi", "Kabupaten/Kota", "Kecamatan", "Desa/Kelurahan", "RT/RW", 
-                "Nama Pendata", "Nama Pemeriksa", "Tanggal", 
+                "Nama Pendata", "Nama Pemeriksa", "Tanggal", "Timestamp",
                 "Jumlah Industri Makanan", "Jumlah Industri Alat Rumah Tangga", 
                 "Jumlah Industri Material Bahan Bangunan", "Jumlah Industri Alat Pertanian",
                 "Jumlah Industri Kerajinan selain logam", "Jumlah Industri Logam", 
-                "Jumlah Industri Lainnya", "Detail Usaha"
+                "Jumlah Industri Lainnya", "Nama Usaha", "Nama Pemilik", "Jumlah Tenaga Kerja",
+                "Ind.Makanan(3.1)", "Ind.Alat RT(3.2)", "Ind.Material(3.3)", 
+                "Ind.Alat Pertanian(3.4)", "Ind.Kerajinan(3.5)", "Ind.Logam(3.6)", 
+                "Ind.Lainnya(3.7)"
             ]
             worksheet.append_row(headers)
             st.success("Worksheet 'Data Industri' berhasil dibuat!")
@@ -77,26 +112,90 @@ def connect_to_gsheet():
         
     except Exception as e:
         st.error(f"Terjadi kesalahan dalam koneksi ke Google Sheets: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())  # Untuk debugging
         return None
-        
-# Fungsi untuk membuat PDF yang sudah diperbaiki
+
+# Fungsi untuk membuat PDF
 def create_pdf(form_data, usaha_data):
+    # Perbaikan import statement - mengubah import ParagraphStyle
+    from reportlab.platypus import Paragraph
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
 
-   # Judul Halaman
-    c.setFont("Times-Bold", 14)
-    judul = "PENDATAAN INDUSTRI PENGOLAHAN DI KELURAHAN KEJAMBON"
-    text_width = c.stringWidth(judul, "Times-Bold", 14)
-    c.drawString((width - text_width) / 2, height - 50, judul)
+    # Konstanta untuk mengelola tata letak PDF
+    page_margin = 50 # Margin dari tepi halaman
+    max_text_width = width - (2 * page_margin) # Lebar maksimum untuk text
+    header_height = 100 # Ruang untuk header halaman
+    block_spacing = 30 # Spasi antar blok
+    row_height = 25 # Tinggi baris standar
+    
+    # Fungsi utilitas untuk membuat text yang bisa wrap
+    def get_wrapped_text(text, max_width, font_name, font_size):
+        if not text:
+            return [""]
+        
+        c.setFont(font_name, font_size)
+        words = text.split()
+        lines = []
+        current_line = []
+        
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            if c.stringWidth(test_line, font_name, font_size) <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                    current_line = [word]
+                else:
+                    # Jika satu kata sudah terlalu panjang, potong saja kata tersebut
+                    truncated_word = word
+                    while c.stringWidth(truncated_word, font_name, font_size) > max_width:
+                        truncated_word = truncated_word[:-1]
+                    
+                    lines.append(truncated_word)
+                    current_line = []
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        return lines
+    
+    # Fungsi untuk membuat header pada setiap halaman
+    def create_header(canvas, page_number=1):
+        canvas.setFont("Times-Bold", 14)
+        
+        # Judul dalam huruf kapital
+        judul = "PENDATAAN INDUSTRI PENGOLAHAN DI KELURAHAN KEJAMBON"
+        text_width = canvas.stringWidth(judul, "Times-Bold", 14)
+        canvas.drawString((width - text_width) / 2, height - 50, judul)
 
-    c.setFont("Times-Bold", 14)
-    subjudul = "KELURAHAN CINTA STATISTIK 2025"
-    text_width = c.stringWidth(subjudul, "Times-Bold", 14)
-    c.drawString((width - text_width) / 2, height - 80, subjudul)
+        # Subjudul
+        canvas.setFont("Times-Bold", 14)
+        subjudul = "KELURAHAN CINTA STATISTIK 2025"
+        text_width = canvas.stringWidth(subjudul, "Times-Bold", 14)
+        canvas.drawString((width - text_width) / 2, height - 80, subjudul)
+        
+        # Nomor halaman
+        if page_number > 1:
+            canvas.setFont("Times-Roman", 10)
+            page_text = f"Halaman {page_number}"
+            canvas.drawString(width - 80, height - 30, page_text)
 
-    y_position = height - 120
+    # Halaman pertama - Header, BLOK I, BLOK II, dan BLOK III
+    create_header(c)
+    y_position = height - header_height
+    
+    # Sediakan ruang untuk setiap blok data
+    block_heights = {
+        "blok_i": 120,   # Estimasi tinggi BLOK I
+        "blok_ii": 90,   # Estimasi tinggi BLOK II
+        "blok_iii": 180  # Estimasi tinggi BLOK III
+    }
 
     # BLOK I
     data = [
@@ -107,6 +206,7 @@ def create_pdf(form_data, usaha_data):
         ["1.4", "Desa/Kelurahan", form_data["desa"]],
         ["1.5", "SLS (RT/RW)", f"RT {form_data['rt']} RW {form_data['rw']}"]
     ]
+    
     table = Table(data, colWidths=[40, 150, 300])
     table.setStyle(TableStyle([
         ('GRID', (0, 1), (-1, -1), 0.5, colors.black),
@@ -122,9 +222,16 @@ def create_pdf(form_data, usaha_data):
         ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
         ('PADDING', (0, 0), (-1, -1), 6),
     ]))
+    
+    # Periksa apakah BLOK I muat di halaman ini
+    if y_position - block_heights["blok_i"] < page_margin:
+        c.showPage()
+        create_header(c, 2)
+        y_position = height - header_height
+    
     table.wrapOn(c, width, height)
-    table.drawOn(c, 50, y_position - 120)
-    y_position -= 160
+    table.drawOn(c, page_margin, y_position - block_heights["blok_i"])
+    y_position -= (block_heights["blok_i"] + block_spacing)
 
     # BLOK II
     data = [
@@ -133,13 +240,14 @@ def create_pdf(form_data, usaha_data):
         ["2.1", "Pendata", form_data["nama_pendata"], form_data["tanggal"], ""],
         ["2.2", "Pemeriksa", form_data["nama_pemeriksa"], form_data["tanggal"], ""]
     ]
+    
     table = Table(data, colWidths=[40, 100, 150, 100, 100])
     table.setStyle(TableStyle([
         ('GRID', (0, 1), (-1, -1), 0.5, colors.black),
         ('BOX', (0, 0), (-1, 0), 0.5, colors.black),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('ALIGN', (0, 0), (-1, 1), 'CENTER'),
-        ('ALIGN', (0, 2), (0, -1), 'CENTER'),  # Perataan tengah nomor 2.1 dan 2.2
+        ('ALIGN', (0, 2), (0, -1), 'CENTER'),
         ('SPAN', (0, 0), (4, 0)),
         ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
         ('BACKGROUND', (0, 1), (-1, 1), colors.lightgrey),
@@ -147,9 +255,16 @@ def create_pdf(form_data, usaha_data):
         ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
         ('PADDING', (0, 0), (-1, -1), 6),
     ]))
+    
+    # Periksa apakah BLOK II muat di halaman ini
+    if y_position - block_heights["blok_ii"] < page_margin:
+        c.showPage()
+        create_header(c, 2)
+        y_position = height - header_height
+    
     table.wrapOn(c, width, height)
-    table.drawOn(c, 50, y_position - 90)
-    y_position -= 130
+    table.drawOn(c, page_margin, y_position - block_heights["blok_ii"])
+    y_position -= (block_heights["blok_ii"] + block_spacing)
 
     # BLOK III
     data = [
@@ -163,13 +278,14 @@ def create_pdf(form_data, usaha_data):
         ["3.6", "Industri Logam", form_data["jml_industri_logam"]],
         ["3.7", "Industri Lainnya", form_data["jml_industri_lainnya"]],
     ]
+    
     table = Table(data, colWidths=[40, 250, 200])
     table.setStyle(TableStyle([
         ('GRID', (0, 1), (-1, -1), 0.5, colors.black),
         ('BOX', (0, 0), (-1, 0), 0.5, colors.black),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('ALIGN', (0, 0), (-1, 1), 'CENTER'),
-        ('ALIGN', (0, 2), (0, -1), 'CENTER'),  # Perataan tengah nomor 3.1 - 3.7
+        ('ALIGN', (0, 2), (0, -1), 'CENTER'),
         ('SPAN', (0, 0), (2, 0)),
         ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
         ('BACKGROUND', (0, 1), (-1, 1), colors.lightgrey),
@@ -177,65 +293,209 @@ def create_pdf(form_data, usaha_data):
         ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
         ('PADDING', (0, 0), (-1, -1), 6),
     ]))
+    
+    # Periksa apakah BLOK III muat di halaman ini
+    if y_position - block_heights["blok_iii"] < page_margin:
+        c.showPage()
+        create_header(c, 2)
+        y_position = height - header_height
+    
     table.wrapOn(c, width, height)
-    table.drawOn(c, 50, y_position - 180)
+    table.drawOn(c, page_margin, y_position - block_heights["blok_iii"])
 
-    # Halaman Baru - BLOK IV
+    # Halaman Baru untuk BLOK IV
     c.showPage()
+    page_number = 2
+    create_header(c, page_number)
 
-    # BLOK IV Header
-    headers = [
-        ["BLOK IV. KETERANGAN USAHA", "", "", "", "", "", "", "", "", "", ""],
-        ["No", "Nama Usaha", "Nama Pemilik", "Kode Jenis Industri Mikro Kecil dan Menengah", "", "", "", "", "", "", "Jumlah\nTenaga Kerja"],
-        ["", "", "", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", ""]
-    ]
-    usaha_rows = []
+    # Konstanta untuk tata letak BLOK IV
+    block_iv_header_height = 80  # Tinggi header BLOK IV
+    max_rows_per_page = (height - header_height - block_iv_header_height - page_margin) // row_height
+    
+    # Definisi lebar kolom
+    col_widths = [30, 100, 100, 30, 30, 30, 30, 30, 30, 30, 60]
+    
+    # Hitung total industri dan tenaga kerja
     total_industri = [0] * 7
     total_tenaga_kerja = 0
-
-    for i, usaha in enumerate(usaha_data):
-        row = [str(i+1), usaha["nama_usaha"], usaha["nama_pemilik"]]
-        for j in range(1, 8):
-            kode = f"3.{j}"
-            row.append("✓" if kode in usaha["kode_industri"] else "")
-        row.append(str(usaha["jumlah_tenaga_kerja"]))
-        usaha_rows.append(row)
+    for usaha in usaha_data:
         for j in range(1, 8):
             if f"3.{j}" in usaha["kode_industri"]:
                 total_industri[j-1] += 1
         total_tenaga_kerja += int(usaha["jumlah_tenaga_kerja"])
+    
+    # Fungsi untuk membuat dan menggambar header tabel BLOK IV
+    def draw_block_iv_header(canvas, y_pos):
+        headers = [
+            ["BLOK IV. KETERANGAN USAHA", "", "", "", "", "", "", "", "", "", ""],
+            ["No", "Nama Usaha", "Nama Pemilik", "Kode Jenis Industri Mikro Kecil dan Menengah", "", "", "", "", "", "", "Jumlah\nTenaga Kerja"],
+            ["", "", "", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", ""]
+        ]
+        header_table = Table(headers, colWidths=col_widths)
+        header_table.setStyle(TableStyle([
+            ('GRID', (0, 1), (-1, -1), 0.5, colors.black),
+            ('GRID', (0, 1), (-1, 2), 0.5, colors.black),
+            ('BOX', (0, 0), (-1, 0), 0.5, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('SPAN', (0, 0), (10, 0)),
+            ('SPAN', (0, 1), (0, 2)),
+            ('SPAN', (1, 1), (1, 2)),
+            ('SPAN', (2, 1), (2, 2)),
+            ('SPAN', (3, 1), (9, 1)),
+            ('SPAN', (10, 1), (10, 2)),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('BACKGROUND', (0, 1), (-1, 2), colors.lightgrey),
+            ('FONTNAME', (0, 0), (-1, -1), 'Times-Roman'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
+            ('PADDING', (0, 0), (-1, -1), 3),  # Kurangi padding agar tidak terlihat berspasi
+        ]))
+        header_table.wrapOn(canvas, width, height)
+        header_table.drawOn(canvas, page_margin, y_pos - block_iv_header_height)
+        return y_pos - block_iv_header_height
 
-    jumlah_row = ["Jumlah", "", ""] + [str(j) for j in total_industri] + [str(total_tenaga_kerja)]
-    data = headers + usaha_rows + [jumlah_row]
-    col_widths = [30, 100, 100, 30, 30, 30, 30, 30, 30, 30, 60]
+    # Fungsi untuk menghitung tinggi baris yang diperlukan untuk teks yang di-wrap
+    def calculate_row_height(name_usaha, name_pemilik, max_width_usaha, max_width_pemilik, font_name, font_size):
+        lines_usaha = len(get_wrapped_text(name_usaha, max_width_usaha, font_name, font_size))
+        lines_pemilik = len(get_wrapped_text(name_pemilik, max_width_pemilik, font_name, font_size))
+        max_lines = max(lines_usaha, lines_pemilik, 1)  # Minimal 1 baris
+        return max_lines * (row_height - 6)  # Tinggi baris dasar dikurangi sedikit untuk padding
 
-    table = Table(data, colWidths=col_widths)
-    table.setStyle(TableStyle([
-        ('GRID', (0, 2), (-1, -1), 0.5, colors.black),
-        ('GRID', (0, 1), (-1, 1), 0.5, colors.black),
-        ('BOX', (0, 0), (-1, 0), 0.5, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),  # default center
-        ('SPAN', (0, 0), (10, 0)),
-        ('SPAN', (0, 1), (0, 2)),
-        ('SPAN', (1, 1), (1, 2)),
-        ('SPAN', (2, 1), (2, 2)),
-        ('SPAN', (3, 1), (9, 1)),
-        ('SPAN', (10, 1), (10, 2)),
-        ('SPAN', (0, -1), (2, -1)),
-        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-        ('BACKGROUND', (0, 1), (-1, 2), colors.lightgrey),
-        ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
-        ('FONTNAME', (0, 0), (-1, -1), 'Times-Roman'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
-        ('FONTNAME', (0, -1), (-1, -1), 'Times-Bold'),
-        ('PADDING', (0, 0), (-1, -1), 6),
-        ('ALIGN', (1, 3), (2, -2), 'LEFT'),
-    ]))
+    # Fungsi untuk menggambar baris data dengan handling wrapping teks
+    def draw_usaha_rows(canvas, start_index, end_index, y_pos):
+        # Siapkan data untuk tabel dengan paragraf untuk teks panjang
+        rows_data = []
+        row_heights = []
+        
+        # Persiapkan style paragraf untuk text wrapping
+        style = ParagraphStyle(
+            name='Normal',
+            fontName='Times-Roman',
+            fontSize=10,
+            leading=12,  # Jarak antar baris dalam paragraf
+            alignment=0  # 0=kiri, 1=tengah, 2=kanan
+        )
+        
+        for i in range(start_index, min(end_index, len(usaha_data))):
+            usaha = usaha_data[i]
+            
+            # Gunakan Paragraph untuk teks yang panjang
+            nama_usaha_para = Paragraph(usaha["nama_usaha"], style)
+            nama_pemilik_para = Paragraph(usaha["nama_pemilik"], style)
+            
+            row = [str(i+1), nama_usaha_para, nama_pemilik_para]
+            for j in range(1, 8):
+                kode = f"3.{j}"
+                row.append("✓" if kode in usaha["kode_industri"] else "")
+            row.append(str(usaha["jumlah_tenaga_kerja"]))
+            rows_data.append(row)
+            
+            # Minimal tinggi baris adalah 30 poin (bisa disesuaikan)
+            # Kita tidak perlu menghitung tinggi secara manual lagi,
+            # karena ReportLab akan menghitungnya berdasarkan Paragraph
+            row_heights.append(30)
+        
+        if rows_data:
+            # Buat tabel dengan baris data yang sudah berisi Paragraph
+            data_table = Table(rows_data, colWidths=col_widths)
+            
+            data_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (0, -1), 'CENTER'),  # Kolom No (0) tengah
+                ('ALIGN', (3, 0), (9, -1), 'CENTER'),  # Kode industri tengah
+                ('ALIGN', (10, 0), (10, -1), 'CENTER'), # Jumlah tenaga kerja tengah
+                ('FONTNAME', (0, 0), (0, -1), 'Times-Roman'),
+                ('FONTNAME', (3, 0), (-1, -1), 'Times-Roman'),
+                ('PADDING', (0, 0), (-1, -1), 2),      # Kurangi padding lebih lagi
+            ]))
+            
+            # Biarkan ReportLab menentukan tinggi yang tepat
+            w, h = data_table.wrapOn(canvas, width - 2*page_margin, height)
+            data_table.drawOn(canvas, page_margin, y_pos - h)
+            return y_pos - h
+        
+        return y_pos
 
-    table.wrapOn(c, width, height)
-    table.drawOn(c, 50, height - 250)
+    # Fungsi untuk menggambar baris jumlah
+    def draw_total_row(canvas, y_pos):
+        jumlah_row = [["Jumlah", "", ""] + [str(j) for j in total_industri] + [str(total_tenaga_kerja)]]
+        total_table = Table(jumlah_row, colWidths=col_widths)
+        total_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('SPAN', (0, 0), (2, 0)), # Gabungkan 3 kolom pertama untuk "Jumlah"
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('FONTNAME', (0, 0), (-1, -1), 'Times-Bold'),
+            ('PADDING', (0, 0), (-1, -1), 2),  # Kurangi padding agar tidak terlihat berspasi
+        ]))
+        w, h = total_table.wrapOn(canvas, width - 2*page_margin, height)
+        total_table.drawOn(canvas, page_margin, y_pos - h)
+        return y_pos - h
 
+    # Proses menghitung tinggi baris yang diperlukan untuk setiap data usaha
+    row_heights = []
+    for usaha in usaha_data:
+        height_needed = calculate_row_height(
+            usaha["nama_usaha"], 
+            usaha["nama_pemilik"],
+            col_widths[1] - 12,
+            col_widths[2] - 12,
+            "Times-Roman", 
+            10
+        )
+        row_heights.append(height_needed)
+
+    # Mulai menggambar BLOK IV
+    y_position = height - header_height  # Posisi awal setelah header halaman
+    
+    # Gambar header BLOK IV
+    y_position = draw_block_iv_header(c, y_position)
+    
+    # Inisialisasi style paragraph untuk digunakan nanti
+    styles = getSampleStyleSheet()
+    normal_style = styles['Normal']
+    normal_style.fontSize = 10
+    normal_style.fontName = 'Times-Roman'
+    normal_style.leading = 12  # Jarak antar baris
+    
+    # Proses data usaha per halaman
+    current_row = 0
+    
+    while current_row < len(usaha_data):
+        # Tentukan perkiraan berapa baris yang bisa ditampilkan
+        rows_left = len(usaha_data) - current_row
+        estimated_rows = min(max_rows_per_page, rows_left)
+        
+        # Gambar baris-baris data
+        new_y_position = draw_usaha_rows(c, current_row, current_row + estimated_rows, y_position)
+        rows_drawn = min(estimated_rows, rows_left)
+        current_row += rows_drawn
+        y_position = new_y_position
+        
+        # Cek apakah ini adalah baris terakhir
+        if current_row >= len(usaha_data):
+            # Jika sudah mencapai baris terakhir, tambahkan baris total
+            if (y_position - 30) >= page_margin:  # Perkiraan tinggi baris total
+                draw_total_row(c, y_position)
+            else:
+                # Tidak cukup ruang, buat halaman baru untuk total
+                c.showPage()
+                page_number += 1
+                create_header(c, page_number)
+                y_position = height - header_height
+                y_position = draw_block_iv_header(c, y_position)
+                draw_total_row(c, y_position)
+        elif (y_position - 30) < page_margin:
+            # Tidak cukup ruang untuk baris berikutnya, buat halaman baru
+            c.showPage()
+            page_number += 1
+            create_header(c, page_number)
+            y_position = height - header_height
+            y_position = draw_block_iv_header(c, y_position)
+    
+    # Selesai membuat PDF
     c.save()
     buffer.seek(0)
     return buffer
@@ -243,9 +503,17 @@ def create_pdf(form_data, usaha_data):
 # Fungsi untuk menyimpan data ke Google Sheets
 def save_to_gsheet(worksheet, form_data, usaha_data):
     if worksheet is None:
+        st.error("Tidak dapat menyimpan data: koneksi worksheet tidak tersedia")
         return False
 
     try:
+        # Siapkan timestamp untuk tracking
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Untuk efisiensi, siapkan semua baris sekaligus untuk append_rows
+        all_rows = []
+        
         for usaha in usaha_data:
             # Siapkan kolom industri sebagai biner (1 atau 0)
             industri_flags = {
@@ -271,6 +539,7 @@ def save_to_gsheet(worksheet, form_data, usaha_data):
                 form_data["nama_pendata"],
                 form_data["nama_pemeriksa"],
                 form_data["tanggal"],
+                timestamp,  # Tambahkan timestamp
                 form_data["jml_industri_makanan"],
                 form_data["jml_industri_alat_rt"],
                 form_data["jml_industri_material"],
@@ -289,13 +558,46 @@ def save_to_gsheet(worksheet, form_data, usaha_data):
                 industri_flags["3.6"],
                 industri_flags["3.7"]
             ]
+            
+            # Tambahkan ke daftar baris
+            all_rows.append(row_data)
 
-            # Simpan ke sheet
-            worksheet.append_row(row_data)
-
-        return True
+        # Jika ada data untuk disimpan
+        if all_rows:
+            # Cek ruang yang tersedia
+            try:
+                cell_values = worksheet.get_all_values()
+                current_rows = len(cell_values)
+                if current_rows + len(all_rows) > 1000:
+                    st.warning(f"Perhatian: Setelah menambahkan data ini, sheet akan berisi {current_rows + len(all_rows)} baris dari 1000 baris maksimum.")
+            except:
+                pass  # Jika gagal memeriksa, lanjutkan saja
+            
+            # Simpan semua baris sekaligus untuk efisiensi
+            try:
+                # Gunakan batch append untuk efisiensi
+                if len(all_rows) > 1:
+                    worksheet.append_rows(all_rows)
+                    st.success(f"Berhasil menyimpan {len(all_rows)} data usaha ke Google Sheets!")
+                else:
+                    worksheet.append_row(all_rows[0])
+                    st.success("Berhasil menyimpan data usaha ke Google Sheets!")
+                
+                return True
+            except gspread.exceptions.APIError as e:
+                if "quota" in str(e).lower():
+                    st.error("Kuota Google Sheets API terlampaui. Coba lagi nanti atau simpan data secara lokal terlebih dahulu.")
+                else:
+                    st.error(f"Error API Google Sheets: {e}")
+                return False
+        else:
+            st.warning("Tidak ada data usaha untuk disimpan.")
+            return False
+            
     except Exception as e:
         st.error(f"Terjadi kesalahan saat menyimpan data: {e}")
+        import traceback
+        st.error(traceback.format_exc())  # Untuk debugging
         return False
 
 # Inisialisasi state
@@ -309,6 +611,8 @@ if 'current_usaha' not in st.session_state:
     st.session_state.current_usaha = 0
 if 'jumlah_usaha' not in st.session_state:
     st.session_state.jumlah_usaha = 0
+if 'data_saved' not in st.session_state:
+    st.session_state.data_saved = False    
 
 # Fungsi untuk mengatur halaman
 def set_page(page):
@@ -316,6 +620,17 @@ def set_page(page):
 
 # Fungsi untuk menyimpan data form
 def save_form_data():
+    # Hitung total usaha dari input BLOK III
+    total_usaha = (
+        int(st.session_state.jml_industri_makanan) +
+        int(st.session_state.jml_industri_alat_rt) +
+        int(st.session_state.jml_industri_material) +
+        int(st.session_state.jml_industri_alat_pertanian) +
+        int(st.session_state.jml_industri_kerajinan) +
+        int(st.session_state.jml_industri_logam) +
+        int(st.session_state.jml_industri_lainnya)
+    )
+    
     form_data = {
         "provinsi": st.session_state.provinsi,
         "kabupaten": st.session_state.kabupaten,
@@ -336,7 +651,7 @@ def save_form_data():
     }
     
     st.session_state.form_data = form_data
-    st.session_state.jumlah_usaha = st.session_state.jml_usaha
+    st.session_state.jumlah_usaha = total_usaha  # Gunakan total yang dihitung
     set_page('usaha')
 
 # Fungsi untuk menyimpan data usaha
@@ -391,7 +706,44 @@ def save_usaha_data():
         # Render ulang halaman agar field kosong kembali
         st.rerun()
 
+# Fungsi untuk kembali ke halaman form dari halaman usaha
+def back_to_form():
+    # Reset data usaha agar tidak tercampur
+    st.session_state.usaha_data = []
+    st.session_state.current_usaha = 0
+    set_page('form')
 
+# Fungsi reset_form_state untuk mengatur ulang seluruh state aplikasi
+def reset_form_state():
+    # Reset halaman ke form
+    st.session_state.page = 'form'
+    
+    # Reset data form
+    st.session_state.form_data = {}
+    
+    # Reset data usaha
+    st.session_state.usaha_data = []
+    st.session_state.current_usaha = 0
+    st.session_state.jumlah_usaha = 0
+    
+    # Reset status penyimpanan data
+    st.session_state.data_saved = False
+    
+    # Hapus key input lainnya jika ada
+    keys_to_remove = [
+        "provinsi", "kabupaten", "kecamatan", "desa", "rt", "rw",
+        "nama_pendata", "nama_pemeriksa", "tanggal", 
+        "jml_industri_makanan", "jml_industri_alat_rt", "jml_industri_material",
+        "jml_industri_alat_pertanian", "jml_industri_kerajinan", "jml_industri_logam",
+        "jml_industri_lainnya", "jml_usaha", "nama_usaha", "nama_pemilik",
+        "industri_makanan", "industri_alat_rt", "industri_material", 
+        "industri_alat_pertanian", "industri_kerajinan", "industri_logam", 
+        "industri_lainnya", "jumlah_tenaga_kerja"
+    ]
+    
+    for key in keys_to_remove:
+        if key in st.session_state:
+            del st.session_state[key]
 
 # Hubungkan ke Google Sheets
 worksheet = connect_to_gsheet()
@@ -416,9 +768,9 @@ if st.session_state.page == 'form':
             desa = st.text_input("1.4 Desa/Kelurahan", value="KEJAMBON", key="desa")
             rt_rw = st.columns(2)
             with rt_rw[0]:
-                rt = st.text_input("RT", key="rt")
+                rt = st.text_input("RT", key="rt", max_chars=2)
             with rt_rw[1]:
-                rw = st.text_input("RW", key="rw")
+                rw = st.text_input("RW", key="rw", max_chars=2)
         
         st.subheader("BLOK II. KETERANGAN PENDATAAN")
         col1, col2 = st.columns(2)
@@ -446,8 +798,18 @@ if st.session_state.page == 'form':
             jml_industri_lainnya = st.number_input("3.7 Jumlah Industri Lainnya", min_value=0, key="jml_industri_lainnya")
         
         st.subheader("BLOK IV. KETERANGAN USAHA")
-        jml_usaha = st.number_input("Jumlah Usaha yang akan didata", min_value=0, key="jml_usaha")
-        
+        total_usaha = (
+            int(st.session_state.jml_industri_makanan) +
+            int(st.session_state.jml_industri_alat_rt) +
+            int(st.session_state.jml_industri_material) +
+            int(st.session_state.jml_industri_alat_pertanian) +
+            int(st.session_state.jml_industri_kerajinan) +
+            int(st.session_state.jml_industri_logam) +
+            int(st.session_state.jml_industri_lainnya)
+        )
+        st.session_state.jml_usaha = total_usaha
+        st.info(f"Jumlah Usaha yang akan didata: {total_usaha} (otomatis dihitung dari total BLOK III)")
+
         submitted = st.form_submit_button("Lanjut ke Data Usaha")
         
         if submitted:
@@ -457,6 +819,23 @@ if st.session_state.page == 'form':
 elif st.session_state.page == 'usaha':
     st.subheader(f"BLOK IV. KETERANGAN USAHA - Usaha {st.session_state.current_usaha + 1} dari {st.session_state.jumlah_usaha}")
     
+    # Tombol kembali
+    if st.button("Kembali ke Form"):
+        back_to_form()
+
+    # Tampilkan rekapitulasi dari halaman pertama
+    with st.expander("Rekapitulasi Industri dari BLOK III", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"Jumlah Industri Makanan: {st.session_state.form_data['jml_industri_makanan']}")
+            st.write(f"Jumlah Industri Alat Rumah Tangga: {st.session_state.form_data['jml_industri_alat_rt']}")
+            st.write(f"Jumlah Industri Material Bahan Bangunan: {st.session_state.form_data['jml_industri_material']}")
+            st.write(f"Jumlah Industri Alat Pertanian: {st.session_state.form_data['jml_industri_alat_pertanian']}")
+        with col2:
+            st.write(f"Jumlah Industri Kerajinan selain logam: {st.session_state.form_data['jml_industri_kerajinan']}")
+            st.write(f"Jumlah Industri Logam: {st.session_state.form_data['jml_industri_logam']}")
+            st.write(f"Jumlah Industri Lainnya: {st.session_state.form_data['jml_industri_lainnya']}")
+
     with st.form(f"usaha_{st.session_state.current_usaha}"):
         col1, col2 = st.columns(2)
         
@@ -541,7 +920,7 @@ elif st.session_state.page == 'preview':
             st.write(f"**Jumlah Tenaga Kerja:** {usaha['jumlah_tenaga_kerja']}")
             st.write(f"**Kode Jenis Industri:** {', '.join(usaha['kode_industri'])}")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         if st.button("Kembali ke Form"):
@@ -552,11 +931,15 @@ elif st.session_state.page == 'preview':
             # Buat PDF
             pdf_buffer = create_pdf(st.session_state.form_data, st.session_state.usaha_data)
             
-            # Simpan ke Google Sheets
-            success = save_to_gsheet(worksheet, st.session_state.form_data, st.session_state.usaha_data)
-            
-            if success:
-                st.success("Data berhasil disimpan ke Google Sheets!")
+            # Simpan ke Google Sheets jika belum disimpan
+            if not st.session_state.data_saved:
+                success = save_to_gsheet(worksheet, st.session_state.form_data, st.session_state.usaha_data)
+        
+                if success:
+                    st.success("Data berhasil disimpan ke Google Sheets!")
+                    st.session_state.data_saved = True
+            else:
+                st.info("Data sudah disimpan sebelumnya.")
             
             # Unduh PDF
             pdf_bytes = pdf_buffer.getvalue()
@@ -567,6 +950,11 @@ elif st.session_state.page == 'preview':
             
             href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">Klik di sini untuk mengunduh PDF</a>'
             st.markdown(href, unsafe_allow_html=True)
+    
+    with col3:
+        if st.button("Isi Form Baru"):
+            reset_form_state()
+            st.rerun()  # Rerun aplikasi untuk me-refresh state
 
 # Tampilkan petunjuk penggunaan
 with st.expander("Petunjuk Penggunaan"):
@@ -578,7 +966,7 @@ with st.expander("Petunjuk Penggunaan"):
     3. **BLOK IV**: Tentukan jumlah usaha yang akan didata.
     4. **Data Usaha**: Isi detail untuk setiap usaha satu per satu.
     5. **Preview**: Periksa semua data yang telah diisi.
-    6. **Simpan & Unduh**: Simpan data ke Google Sheets dan unduh formulir sebagai PDF)
+    6. **Simpan & Unduh**: Simpan data ke Google Sheets dan unduh formulir sebagai PDF.
                 
     ### Keterangan
     1.  Industri adalah kegiatan produksi yang mengubah barang dasar (bahan mentah menjadi barang jadi/setengah jadi dan atau dari barang yang kurang nilainya menjadi barang yang lebih tinggi nilainya. Termasuk ke dalam kategori ini adalah kegiatan jasa industri (maklun).              
