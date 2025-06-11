@@ -613,6 +613,12 @@ if 'jumlah_usaha' not in st.session_state:
     st.session_state.jumlah_usaha = 0
 if 'data_saved' not in st.session_state:
     st.session_state.data_saved = False    
+if 'edit_mode' not in st.session_state:
+    st.session_state.edit_mode = None
+if 'edit_form_data' not in st.session_state:
+    st.session_state.edit_form_data = {}
+if 'edit_usaha_index' not in st.session_state:
+    st.session_state.edit_usaha_index = 0
 
 # Fungsi untuk mengatur halaman
 def set_page(page):
@@ -729,6 +735,11 @@ def reset_form_state():
     # Reset status penyimpanan data
     st.session_state.data_saved = False
     
+    # Reset state edit - BARU
+    st.session_state.edit_mode = None
+    st.session_state.edit_form_data = {}
+    st.session_state.edit_usaha_index = 0
+    
     # Hapus key input lainnya jika ada
     keys_to_remove = [
         "provinsi", "kabupaten", "kecamatan", "desa", "rt", "rw",
@@ -738,12 +749,93 @@ def reset_form_state():
         "jml_industri_lainnya", "jml_usaha", "nama_usaha", "nama_pemilik",
         "industri_makanan", "industri_alat_rt", "industri_material", 
         "industri_alat_pertanian", "industri_kerajinan", "industri_logam", 
-        "industri_lainnya", "jumlah_tenaga_kerja"
+        "industri_lainnya", "jumlah_tenaga_kerja",
+        # Tambahan untuk edit keys - BARU
+        "edit_nama_usaha", "edit_nama_pemilik", "edit_industri_makanan", 
+        "edit_industri_alat_rt", "edit_industri_material", "edit_industri_alat_pertanian", 
+        "edit_industri_kerajinan", "edit_industri_logam", "edit_industri_lainnya", 
+        "edit_jumlah_tenaga_kerja"
     ]
     
     for key in keys_to_remove:
         if key in st.session_state:
             del st.session_state[key]
+
+
+# FUNGSI BARU - Untuk mengatur mode edit
+def set_edit_mode(mode):
+    st.session_state.edit_mode = mode
+    if mode == 'form':
+        st.session_state.edit_form_data = st.session_state.form_data.copy()
+    elif mode == 'usaha':
+        st.session_state.edit_usaha_index = 0
+
+# FUNGSI BARU - Untuk menyimpan hasil edit form
+def save_edited_form():
+    st.session_state.form_data = st.session_state.edit_form_data.copy()
+    # Hitung ulang jumlah usaha berdasarkan edit
+    total_usaha = (
+        int(st.session_state.edit_form_data['jml_industri_makanan']) +
+        int(st.session_state.edit_form_data['jml_industri_alat_rt']) +
+        int(st.session_state.edit_form_data['jml_industri_material']) +
+        int(st.session_state.edit_form_data['jml_industri_alat_pertanian']) +
+        int(st.session_state.edit_form_data['jml_industri_kerajinan']) +
+        int(st.session_state.edit_form_data['jml_industri_logam']) +
+        int(st.session_state.edit_form_data['jml_industri_lainnya'])
+    )
+    
+    # Jika jumlah usaha berubah, sesuaikan data usaha
+    current_usaha_count = len(st.session_state.usaha_data)
+    if total_usaha < current_usaha_count:
+        # Kurangi data usaha
+        st.session_state.usaha_data = st.session_state.usaha_data[:total_usaha]
+        st.warning(f"Data usaha dikurangi dari {current_usaha_count} menjadi {total_usaha}")
+    elif total_usaha > current_usaha_count:
+        # Tambah slot usaha kosong
+        for i in range(total_usaha - current_usaha_count):
+            st.session_state.usaha_data.append({
+                "nama_usaha": "",
+                "nama_pemilik": "",
+                "kode_industri": [],
+                "jumlah_tenaga_kerja": 0
+            })
+        st.warning(f"Slot usaha ditambah dari {current_usaha_count} menjadi {total_usaha}. Silakan isi data usaha yang kosong.")
+    
+    st.session_state.jumlah_usaha = total_usaha
+    st.session_state.edit_mode = None
+    st.success("Data form berhasil diperbarui!")
+
+# FUNGSI BARU - Untuk menyimpan hasil edit usaha
+def save_edited_usaha():
+    index = st.session_state.edit_usaha_index
+    
+    # Kumpulkan kode industri dari checkbox
+    kode_industri = []
+    if st.session_state.get('edit_industri_makanan', False):
+        kode_industri.append("3.1")
+    if st.session_state.get('edit_industri_alat_rt', False):
+        kode_industri.append("3.2")
+    if st.session_state.get('edit_industri_material', False):
+        kode_industri.append("3.3")
+    if st.session_state.get('edit_industri_alat_pertanian', False):
+        kode_industri.append("3.4")
+    if st.session_state.get('edit_industri_kerajinan', False):
+        kode_industri.append("3.5")
+    if st.session_state.get('edit_industri_logam', False):
+        kode_industri.append("3.6")
+    if st.session_state.get('edit_industri_lainnya', False):
+        kode_industri.append("3.7")
+
+    # Update data usaha
+    st.session_state.usaha_data[index] = {
+        "nama_usaha": st.session_state.edit_nama_usaha,
+        "nama_pemilik": st.session_state.edit_nama_pemilik,
+        "kode_industri": kode_industri,
+        "jumlah_tenaga_kerja": st.session_state.edit_jumlah_tenaga_kerja
+    }
+    
+    st.session_state.edit_mode = None
+    st.success(f"Data usaha {index + 1} berhasil diperbarui!")
 
 # Hubungkan ke Google Sheets
 worksheet = connect_to_gsheet()
@@ -817,36 +909,109 @@ if st.session_state.page == 'form':
 
 # Halaman Usaha
 elif st.session_state.page == 'usaha':
-    st.subheader(f"BLOK IV. KETERANGAN USAHA - Usaha {st.session_state.current_usaha + 1} dari {st.session_state.jumlah_usaha}")
+    # Progress bar dan informasi yang lebih jelas
+    progress = (st.session_state.current_usaha) / st.session_state.jumlah_usaha
+    st.progress(progress)
+    
+    # Header dengan informasi yang lebih jelas
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.subheader(f"BLOK IV. KETERANGAN USAHA")
+    with col2:
+        st.metric("Progress", f"{st.session_state.current_usaha + 1}/{st.session_state.jumlah_usaha}")
+    
+    # Info box dengan warna
+    if st.session_state.current_usaha == 0:
+        st.info(f"📝 Sedang mengisi data untuk *USAHA PERTAMA* dari {st.session_state.jumlah_usaha} usaha total")
+    elif st.session_state.current_usaha == st.session_state.jumlah_usaha - 1:
+        st.warning(f"📝 Sedang mengisi data untuk *USAHA TERAKHIR* ({st.session_state.current_usaha + 1} dari {st.session_state.jumlah_usaha})")
+    else:
+        st.info(f"📝 Sedang mengisi data untuk *USAHA KE-{st.session_state.current_usaha + 1}* dari {st.session_state.jumlah_usaha} usaha total")
     
     # Tombol kembali
     if st.button("Kembali ke Form"):
         back_to_form()
 
-    # Tampilkan rekapitulasi dari halaman pertama
-    with st.expander("Rekapitulasi Industri dari BLOK III", expanded=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write(f"Jumlah Industri Makanan: {st.session_state.form_data['jml_industri_makanan']}")
-            st.write(f"Jumlah Industri Alat Rumah Tangga: {st.session_state.form_data['jml_industri_alat_rt']}")
-            st.write(f"Jumlah Industri Material Bahan Bangunan: {st.session_state.form_data['jml_industri_material']}")
-            st.write(f"Jumlah Industri Alat Pertanian: {st.session_state.form_data['jml_industri_alat_pertanian']}")
-        with col2:
-            st.write(f"Jumlah Industri Kerajinan selain logam: {st.session_state.form_data['jml_industri_kerajinan']}")
-            st.write(f"Jumlah Industri Logam: {st.session_state.form_data['jml_industri_logam']}")
-            st.write(f"Jumlah Industri Lainnya: {st.session_state.form_data['jml_industri_lainnya']}")
+    # Tampilkan rekapitulasi dari halaman pertama - LANGSUNG TERLIHAT
+    st.markdown("---")
+    st.subheader("📊 Rekapitulasi Industri dari BLOK III")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write(f"• Industri Makanan: **{st.session_state.form_data['jml_industri_makanan']}**")
+        st.write(f"• Industri Alat Rumah Tangga: **{st.session_state.form_data['jml_industri_alat_rt']}**")
+        st.write(f"• Industri Material Bahan Bangunan: **{st.session_state.form_data['jml_industri_material']}**")
+        st.write(f"• Industri Alat Pertanian: **{st.session_state.form_data['jml_industri_alat_pertanian']}**")
+    with col2:
+        st.write(f"• Industri Kerajinan selain logam: **{st.session_state.form_data['jml_industri_kerajinan']}**")
+        st.write(f"• Industri Logam: **{st.session_state.form_data['jml_industri_logam']}**")
+        st.write(f"• Industri Lainnya: **{st.session_state.form_data['jml_industri_lainnya']}**")
+    
+    total = sum([
+        st.session_state.form_data['jml_industri_makanan'],
+        st.session_state.form_data['jml_industri_alat_rt'],
+        st.session_state.form_data['jml_industri_material'],
+        st.session_state.form_data['jml_industri_alat_pertanian'],
+        st.session_state.form_data['jml_industri_kerajinan'],
+        st.session_state.form_data['jml_industri_logam'],
+        st.session_state.form_data['jml_industri_lainnya']
+    ])
+    st.success(f"**Total Usaha yang harus didata: {total}**")
+        
+    # Tampilkan usaha yang sudah diisi (jika ada) - LANGSUNG TERLIHAT
+    if st.session_state.current_usaha > 0:
+        st.markdown("---")
+        st.subheader(f"✅ Data Usaha yang Sudah Diisi ({st.session_state.current_usaha} usaha)")
+    
+        # Mapping kode industri ke nama industri
+        industri_mapping = {
+            '3.1': 'Industri Makanan',
+            '3.2': 'Industri Alat Rumah Tangga', 
+            '3.3': 'Industri Material Bahan Bangunan',
+            '3.4': 'Industri Alat Pertanian',
+            '3.5': 'Industri Kerajinan selain logam',
+            '3.6': 'Industri Logam',
+            '3.7': 'Industri Lainnya'
+        }
 
+    # Tampilkan dalam format tabel yang lebih compact
+    for i, usaha in enumerate(st.session_state.usaha_data[:st.session_state.current_usaha]):
+        col1, col2, col3 = st.columns([1, 3, 2])
+        with col1:
+            st.write(f"**{i+1}.**")
+        with col2:
+            st.write(f"**{usaha['nama_usaha']}** ({usaha['nama_pemilik']})")
+        with col3:
+            # Buat list nama industri dari kode yang tersimpan
+            nama_industri_list = []
+            for kode in usaha['kode_industri']:
+                if kode in industri_mapping:
+                    nama_industri_list.append(industri_mapping[kode])
+            
+            # Tampilkan nama industri dan jumlah pekerja
+            industri_text = ", ".join(nama_industri_list) if nama_industri_list else "Tidak ada industri"
+            st.write(f"🏭 {industri_text}")
+            st.write(f"👥 {usaha['jumlah_tenaga_kerja']} pekerja")
+
+    # Form input usaha
+    st.markdown("---")
+    
     with st.form(f"usaha_{st.session_state.current_usaha}"):
+        st.markdown(f"### 📋 Input Data Usaha ke-{st.session_state.current_usaha + 1}")
+        
         col1, col2 = st.columns(2)
         
         with col1:
-            nama_usaha = st.text_input("Nama Usaha", key="nama_usaha")
-            nama_pemilik = st.text_input("Nama Pemilik", key="nama_pemilik")
+            nama_usaha = st.text_input("Nama Usaha", key="nama_usaha", help="Masukkan nama usaha/toko/industri")
+            nama_pemilik = st.text_input("Nama Pemilik", key="nama_pemilik", help="Masukkan nama pemilik usaha")
         
         with col2:
-            jumlah_tenaga_kerja = st.number_input("Jumlah Tenaga Kerja", min_value=0, key="jumlah_tenaga_kerja")
+            jumlah_tenaga_kerja = st.number_input("Jumlah Tenaga Kerja", min_value=1, key="jumlah_tenaga_kerja", 
+                                                help="Termasuk pemilik usaha")
         
         st.subheader("Kode Jenis Industri Mikro Kecil dan Menengah")
+        st.caption("Pilih semua jenis industri yang sesuai dengan usaha ini:")
+        
         col1, col2 = st.columns(2)
         
         with col1:
@@ -860,101 +1025,207 @@ elif st.session_state.page == 'usaha':
             industri_logam = st.checkbox("3.6 Industri Logam", key="industri_logam")
             industri_lainnya = st.checkbox("3.7 Industri Lainnya", key="industri_lainnya")
         
-        submitted = st.form_submit_button("Simpan Data Usaha")
+        # Tombol submit dengan teks yang lebih deskriptif
+        if st.session_state.current_usaha < st.session_state.jumlah_usaha - 1:
+            submitted = st.form_submit_button(f"💾 Simpan & Lanjut ke Usaha ke-{st.session_state.current_usaha + 2}")
+        else:
+            submitted = st.form_submit_button("✅ Simpan Data Terakhir & Lanjut ke Preview")
         
         if submitted:
-            save_usaha_data()
+            # Validasi input
+            if not nama_usaha.strip():
+                st.error("Nama Usaha harus diisi!")
+            elif not nama_pemilik.strip():
+                st.error("Nama Pemilik harus diisi!")
+            elif not (industri_makanan or industri_alat_rt or industri_material or 
+                     industri_alat_pertanian or industri_kerajinan or industri_logam or industri_lainnya):
+                st.error("Minimal pilih satu jenis industri!")
+            else:
+                save_usaha_data()
 
 # Halaman Preview
-elif st.session_state.page == 'preview':
+elif st.session_state.page == 'preview':    
     st.subheader("Preview Data")
     
-    st.write("### BLOK I. KETERANGAN TEMPAT")
-    col1, col2 = st.columns(2)
+    # Mode Edit Usaha
+    if st.session_state.edit_mode == 'usaha':
+        index = st.session_state.edit_usaha_index
+        usaha = st.session_state.usaha_data[index]
+        
+        st.subheader(f"Edit Data Usaha {index + 1}")
+        st.info(f"Mengedit: {usaha.get('nama_usaha', 'Nama usaha tidak tersedia')}")
+        
+        with st.form(f"edit_usaha_{index}"):
+            nama_usaha = st.text_input("Nama Usaha", value=usaha.get('nama_usaha', ''), key=f"edit_nama_usaha_{index}")
+            nama_pemilik = st.text_input("Nama Pemilik", value=usaha.get('nama_pemilik', ''), key=f"edit_nama_pemilik_{index}")
+            
+            st.write("**Kode Jenis Industri:**")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                industri_makanan = st.checkbox("3.1 Industri Makanan",
+                                              value="3.1" in usaha.get('kode_industri', []), key=f"edit_industri_makanan_{index}")
+                industri_alat_rt = st.checkbox("3.2 Industri Alat Rumah Tangga",
+                                              value="3.2" in usaha.get('kode_industri', []), key=f"edit_industri_alat_rt_{index}")
+                industri_material = st.checkbox("3.3 Industri Material Bahan Bangunan",
+                                               value="3.3" in usaha.get('kode_industri', []), key=f"edit_industri_material_{index}")
+                industri_alat_pertanian = st.checkbox("3.4 Industri Alat Pertanian",
+                                                     value="3.4" in usaha.get('kode_industri', []), key=f"edit_industri_alat_pertanian_{index}")
+            
+            with col2:
+                industri_kerajinan = st.checkbox("3.5 Industri Kerajinan selain logam",
+                                                value="3.5" in usaha.get('kode_industri', []), key=f"edit_industri_kerajinan_{index}")
+                industri_logam = st.checkbox("3.6 Industri Logam",
+                                            value="3.6" in usaha.get('kode_industri', []), key=f"edit_industri_logam_{index}")
+                industri_lainnya = st.checkbox("3.7 Industri Lainnya",
+                                              value="3.7" in usaha.get('kode_industri', []), key=f"edit_industri_lainnya_{index}")
+            
+            jumlah_tenaga_kerja = st.number_input("Jumlah Tenaga Kerja",
+                                                 min_value=0, value=int(usaha.get('jumlah_tenaga_kerja', 0)), key=f"edit_jumlah_tenaga_kerja_{index}")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.form_submit_button("Simpan Perubahan"):
+                    # Update data usaha dengan nilai baru
+                    kode_industri = []
+                    if industri_makanan:
+                        kode_industri.append("3.1")
+                    if industri_alat_rt:
+                        kode_industri.append("3.2")
+                    if industri_material:
+                        kode_industri.append("3.3")
+                    if industri_alat_pertanian:
+                        kode_industri.append("3.4")
+                    if industri_kerajinan:
+                        kode_industri.append("3.5")
+                    if industri_logam:
+                        kode_industri.append("3.6")
+                    if industri_lainnya:
+                        kode_industri.append("3.7")
+                    
+                    # Update data pada indeks yang benar
+                    st.session_state.usaha_data[index].update({
+                        'nama_usaha': nama_usaha,
+                        'nama_pemilik': nama_pemilik,
+                        'jumlah_tenaga_kerja': jumlah_tenaga_kerja,
+                        'kode_industri': kode_industri
+                    })
+                    
+                    st.session_state.edit_mode = None
+                    st.session_state.edit_usaha_index = None
+                    st.success(f"Data Usaha {index + 1} berhasil diupdate!")
+                    st.rerun()
+            
+            with col2:
+                if st.form_submit_button("Batal"):
+                    st.session_state.edit_mode = None
+                    st.session_state.edit_usaha_index = None
+                    st.rerun()
     
-    with col1:
-        st.write(f"**1.1 Provinsi:** {st.session_state.form_data['provinsi']}")
-        st.write(f"**1.2 Kabupaten/Kota:** {st.session_state.form_data['kabupaten']}")
-        st.write(f"**1.3 Kecamatan:** {st.session_state.form_data['kecamatan']}")
-    
-    with col2:
-        st.write(f"**1.4 Desa/Kelurahan:** {st.session_state.form_data['desa']}")
-        st.write(f"**1.5 SLS (RT/RW):** RT {st.session_state.form_data['rt']} RW {st.session_state.form_data['rw']}")
-    
-    st.write("### BLOK II. KETERANGAN PENDATAAN")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.write(f"**2.1 Nama Pendata:** {st.session_state.form_data['nama_pendata']}")
-        st.write(f"**2.2 Nama Pemeriksa:** {st.session_state.form_data['nama_pemeriksa']}")
-    
-    with col2:
-        st.write(f"**Tanggal:** {st.session_state.form_data['tanggal']}")
-    
-    st.write("### BLOK III. REKAPITULASI")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.write(f"**3.1 Jumlah Industri Makanan:** {st.session_state.form_data['jml_industri_makanan']}")
-        st.write(f"**3.2 Jumlah Industri Alat Rumah Tangga:** {st.session_state.form_data['jml_industri_alat_rt']}")
-        st.write(f"**3.3 Jumlah Industri Material Bahan Bangunan:** {st.session_state.form_data['jml_industri_material']}")
-        st.write(f"**3.4 Jumlah Industri Alat Pertanian:** {st.session_state.form_data['jml_industri_alat_pertanian']}")
-    
-    with col2:
-        st.write(f"**3.5 Jumlah Industri Kerajinan selain logam:** {st.session_state.form_data['jml_industri_kerajinan']}")
-        st.write(f"**3.6 Jumlah Industri Logam:** {st.session_state.form_data['jml_industri_logam']}")
-        st.write(f"**3.7 Jumlah Industri Lainnya:** {st.session_state.form_data['jml_industri_lainnya']}")
-    
-    st.write("### BLOK IV. KETERANGAN USAHA")
-    
-    for i, usaha in enumerate(st.session_state.usaha_data):
-        st.write(f"#### Usaha {i+1}")
+    # Mode Preview Normal
+    else:
+        st.write("### BLOK I. KETERANGAN TEMPAT")
         col1, col2 = st.columns(2)
         
         with col1:
-            st.write(f"**Nama Usaha:** {usaha['nama_usaha']}")
-            st.write(f"**Nama Pemilik:** {usaha['nama_pemilik']}")
+            st.write(f"**1.1 Provinsi:** {st.session_state.form_data['provinsi']}")
+            st.write(f"**1.2 Kabupaten/Kota:** {st.session_state.form_data['kabupaten']}")
+            st.write(f"**1.3 Kecamatan:** {st.session_state.form_data['kecamatan']}")
         
         with col2:
-            st.write(f"**Jumlah Tenaga Kerja:** {usaha['jumlah_tenaga_kerja']}")
-            st.write(f"**Kode Jenis Industri:** {', '.join(usaha['kode_industri'])}")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("Kembali ke Form"):
-            set_page('form')
-    
-    with col2:
-        if st.button("Simpan & Unduh PDF"):
-            # Buat PDF
-            pdf_buffer = create_pdf(st.session_state.form_data, st.session_state.usaha_data)
-            
-            # Simpan ke Google Sheets jika belum disimpan
-            if not st.session_state.data_saved:
-                success = save_to_gsheet(worksheet, st.session_state.form_data, st.session_state.usaha_data)
+            st.write(f"**1.4 Desa/Kelurahan:** {st.session_state.form_data['desa']}")
+            st.write(f"**1.5 SLS (RT/RW):** RT {st.session_state.form_data['rt']} RW {st.session_state.form_data['rw']}")
         
+        st.write("### BLOK II. KETERANGAN PENDATAAN")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write(f"**2.1 Nama Pendata:** {st.session_state.form_data['nama_pendata']}")
+            st.write(f"**2.2 Nama Pemeriksa:** {st.session_state.form_data['nama_pemeriksa']}")
+        
+        with col2:
+            st.write(f"**Tanggal:** {st.session_state.form_data['tanggal']}")
+        
+        st.write("### BLOK III. REKAPITULASI")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write(f"**3.1 Jumlah Industri Makanan:** {st.session_state.form_data['jml_industri_makanan']}")
+            st.write(f"**3.2 Jumlah Industri Alat Rumah Tangga:** {st.session_state.form_data['jml_industri_alat_rt']}")
+            st.write(f"**3.3 Jumlah Industri Material Bahan Bangunan:** {st.session_state.form_data['jml_industri_material']}")
+            st.write(f"**3.4 Jumlah Industri Alat Pertanian:** {st.session_state.form_data['jml_industri_alat_pertanian']}")
+        
+        with col2:
+            st.write(f"**3.5 Jumlah Industri Kerajinan selain logam:** {st.session_state.form_data['jml_industri_kerajinan']}")
+            st.write(f"**3.6 Jumlah Industri Logam:** {st.session_state.form_data['jml_industri_logam']}")
+            st.write(f"**3.7 Jumlah Industri Lainnya:** {st.session_state.form_data['jml_industri_lainnya']}")
+        
+        st.write("### BLOK IV. KETERANGAN USAHA")
+        
+        for i, usaha in enumerate(st.session_state.usaha_data):
+            # Container untuk setiap usaha
+            with st.container():
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    st.write(f"#### Usaha {i+1}")
+                    
+                    # Sub kolom untuk detail usaha
+                    detail_col1, detail_col2 = st.columns(2)
+                    
+                    with detail_col1:
+                        st.write(f"**Nama Usaha:** {usaha['nama_usaha']}")
+                        st.write(f"**Nama Pemilik:** {usaha['nama_pemilik']}")
+                    
+                    with detail_col2:
+                        st.write(f"**Jumlah Tenaga Kerja:** {usaha['jumlah_tenaga_kerja']}")
+                        st.write(f"**Kode Jenis Industri:** {', '.join(usaha['kode_industri'])}")
+                
+                with col2:
+                    # Tombol edit di samping kanan
+                    st.write("")  # Spacer untuk alignment
+                    if st.button("✏️ Edit", key=f"edit_usaha_{i}"):
+                        st.session_state.edit_usaha_index = i
+                        st.session_state.edit_mode = 'usaha'
+                        st.rerun()
+                
+                # Divider antar usaha
+                if i < len(st.session_state.usaha_data) - 1:
+                    st.divider()
+        
+        # Tombol aksi di bagian bawah
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("Simpan & Unduh PDF"):
+                # Buat PDF
+                pdf_buffer = create_pdf(st.session_state.form_data, st.session_state.usaha_data)
+                
+                # Simpan ke Google Sheets jika belum disimpan
+                if not st.session_state.data_saved:
+                    success = save_to_gsheet(worksheet, st.session_state.form_data, st.session_state.usaha_data)
+                
                 if success:
                     st.success("Data berhasil disimpan ke Google Sheets!")
                     st.session_state.data_saved = True
-            else:
-                st.info("Data sudah disimpan sebelumnya.")
-            
-            # Unduh PDF
-            pdf_bytes = pdf_buffer.getvalue()
-            b64 = base64.b64encode(pdf_bytes).decode()
-            
-            tanggal_str = st.session_state.form_data["tanggal"].replace("-", "")
-            filename = f"Pendataan_Industri_{st.session_state.form_data['desa']}_{tanggal_str}.pdf"
-            
-            href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">Klik di sini untuk mengunduh PDF</a>'
-            st.markdown(href, unsafe_allow_html=True)
-    
-    with col3:
-        if st.button("Isi Form Baru"):
-            reset_form_state()
-            st.rerun()  # Rerun aplikasi untuk me-refresh state
+                else:
+                    st.info("Data sudah disimpan sebelumnya.")
+                
+                # Unduh PDF
+                pdf_bytes = pdf_buffer.getvalue()
+                b64 = base64.b64encode(pdf_bytes).decode()
+                
+                tanggal_str = st.session_state.form_data["tanggal"].replace("-", "")
+                filename = f"Pendataan_Industri_{st.session_state.form_data['desa']}_{tanggal_str}.pdf"
+                
+                href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">Klik di sini untuk mengunduh PDF</a>'
+                st.markdown(href, unsafe_allow_html=True)
+        
+        with col2:
+            if st.button("Isi Form Baru"):
+                reset_form_state()
+                st.rerun()
 
 # Tampilkan petunjuk penggunaan
 with st.expander("Petunjuk Penggunaan"):
