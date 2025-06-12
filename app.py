@@ -626,7 +626,17 @@ def set_page(page):
 
 # Fungsi untuk menyimpan data form
 def save_form_data():
-    # Hitung total usaha dari input BLOK III
+    # Validasi form terlebih dahulu
+    is_valid, error_messages = validate_form_data()
+    
+    if not is_valid:
+        # Tampilkan pesan error
+        st.error("**Data tidak lengkap! Mohon perbaiki kesalahan berikut:**")
+        for error in error_messages:
+            st.error(f"❌ {error}")
+        return False  # Tidak lanjut ke halaman berikutnya
+    
+    # Jika validasi berhasil, lanjutkan seperti biasa
     total_usaha = (
         int(st.session_state.jml_industri_makanan) +
         int(st.session_state.jml_industri_alat_rt) +
@@ -638,14 +648,14 @@ def save_form_data():
     )
     
     form_data = {
-        "provinsi": st.session_state.provinsi,
-        "kabupaten": st.session_state.kabupaten,
-        "kecamatan": st.session_state.kecamatan,
-        "desa": st.session_state.desa,
-        "rt": st.session_state.rt,
-        "rw": st.session_state.rw,
-        "nama_pendata": st.session_state.nama_pendata,
-        "nama_pemeriksa": st.session_state.nama_pemeriksa,
+        "provinsi": st.session_state.provinsi.strip(),
+        "kabupaten": st.session_state.kabupaten.strip(),
+        "kecamatan": st.session_state.kecamatan.strip(),
+        "desa": st.session_state.desa.strip(),
+        "rt": st.session_state.rt.strip(),
+        "rw": st.session_state.rw.strip(),
+        "nama_pendata": st.session_state.nama_pendata.strip(),
+        "nama_pemeriksa": st.session_state.nama_pemeriksa.strip(),
         "tanggal": st.session_state.tanggal.strftime('%Y-%m-%d'),
         "jml_industri_makanan": st.session_state.jml_industri_makanan,
         "jml_industri_alat_rt": st.session_state.jml_industri_alat_rt,
@@ -657,8 +667,9 @@ def save_form_data():
     }
     
     st.session_state.form_data = form_data
-    st.session_state.jumlah_usaha = total_usaha  # Gunakan total yang dihitung
+    st.session_state.jumlah_usaha = total_usaha
     set_page('usaha')
+    return True
 
 # Fungsi untuk menyimpan data usaha
 def save_usaha_data():
@@ -762,7 +773,7 @@ def reset_form_state():
             del st.session_state[key]
 
 
-# FUNGSI BARU - Untuk mengatur mode edit
+# FUNGSI Untuk mengatur mode edit
 def set_edit_mode(mode):
     st.session_state.edit_mode = mode
     if mode == 'form':
@@ -770,7 +781,7 @@ def set_edit_mode(mode):
     elif mode == 'usaha':
         st.session_state.edit_usaha_index = 0
 
-# FUNGSI BARU - Untuk menyimpan hasil edit form
+# FUNGSI Untuk menyimpan hasil edit form
 def save_edited_form():
     st.session_state.form_data = st.session_state.edit_form_data.copy()
     # Hitung ulang jumlah usaha berdasarkan edit
@@ -805,7 +816,7 @@ def save_edited_form():
     st.session_state.edit_mode = None
     st.success("Data form berhasil diperbarui!")
 
-# FUNGSI BARU - Untuk menyimpan hasil edit usaha
+# FUNGSI Untuk menyimpan hasil edit usaha
 def save_edited_usaha():
     index = st.session_state.edit_usaha_index
     
@@ -837,6 +848,99 @@ def save_edited_usaha():
     st.session_state.edit_mode = None
     st.success(f"Data usaha {index + 1} berhasil diperbarui!")
 
+# Fungsi untuk validasi form sebelum lanjut ke halaman berikutnya
+def validate_form_data():
+    """
+    Validasi semua field yang wajib diisi di BLOK I, II, dan III
+    Returns: (is_valid, error_messages)
+    """
+    errors = []
+    
+    # Validasi BLOK I - Keterangan Tempat
+    if not st.session_state.get('provinsi', '').strip():
+        errors.append("BLOK I: Provinsi harus diisi")
+    if not st.session_state.get('kabupaten', '').strip():
+        errors.append("BLOK I: Kabupaten/Kota harus diisi")
+    if not st.session_state.get('kecamatan', '').strip():
+        errors.append("BLOK I: Kecamatan harus diisi")
+    if not st.session_state.get('desa', '').strip():
+        errors.append("BLOK I: Desa/Kelurahan harus diisi")
+    if not st.session_state.get('rt', '').strip():
+        errors.append("BLOK I: RT harus diisi")
+    if not st.session_state.get('rw', '').strip():
+        errors.append("BLOK I: RW harus diisi")
+    
+    # Validasi BLOK II - Keterangan Pendataan
+    if not st.session_state.get('nama_pendata', '').strip():
+        errors.append("BLOK II: Nama Pendata harus diisi")
+    if not st.session_state.get('nama_pemeriksa', '').strip():
+        errors.append("BLOK II: Nama Pemeriksa harus diisi")
+    if 'tanggal' not in st.session_state or st.session_state.tanggal is None:
+        errors.append("BLOK II: Tanggal harus diisi")
+    
+    # Validasi BLOK III - Rekapitulasi
+    blok_iii_fields = [
+        ('jml_industri_makanan', 'Jumlah Industri Makanan'),
+        ('jml_industri_alat_rt', 'Jumlah Industri Alat Rumah Tangga'),
+        ('jml_industri_material', 'Jumlah Industri Material Bahan Bangunan'),
+        ('jml_industri_alat_pertanian', 'Jumlah Industri Alat Pertanian'),
+        ('jml_industri_kerajinan', 'Jumlah Industri Kerajinan selain logam'),
+        ('jml_industri_logam', 'Jumlah Industri Logam'),
+        ('jml_industri_lainnya', 'Jumlah Industri Lainnya')
+    ]
+    
+    # Flag untuk mengecek apakah semua field BLOK III sudah diisi
+    blok_iii_complete = True
+    
+    # Cek setiap field BLOK III
+    for field_key, field_name in blok_iii_fields:
+        if field_key not in st.session_state or st.session_state[field_key] is None:
+            errors.append(f"BLOK III: {field_name} harus diisi (minimal 0)")
+            blok_iii_complete = False
+        elif int(st.session_state[field_key]) < 0:
+            errors.append(f"BLOK III: {field_name} tidak boleh bernilai negatif")
+            blok_iii_complete = False
+    
+    # Hanya validasi total usaha jika semua field BLOK III sudah diisi dengan benar
+    # DAN tidak ada error lain dari BLOK I dan II
+    if blok_iii_complete and len(errors) == 0:
+        total_usaha = (
+            int(st.session_state.get('jml_industri_makanan', 0)) +
+            int(st.session_state.get('jml_industri_alat_rt', 0)) +
+            int(st.session_state.get('jml_industri_material', 0)) +
+            int(st.session_state.get('jml_industri_alat_pertanian', 0)) +
+            int(st.session_state.get('jml_industri_kerajinan', 0)) +
+            int(st.session_state.get('jml_industri_logam', 0)) +
+            int(st.session_state.get('jml_industri_lainnya', 0))
+        )
+        
+        # Validasi total usaha tidak boleh 0
+        if total_usaha == 0:
+            errors.append("BLOK III: Total jumlah usaha tidak boleh 0. Minimal harus ada 1 usaha yang didata.")
+    
+    return len(errors) == 0, errors
+
+# Fungsi untuk menampilkan ringkasan data sebelum submit
+def show_data_summary():
+    """
+    Menampilkan ringkasan data yang akan diisi
+    """
+    if st.session_state.get('jml_industri_makanan') is not None:
+        total_usaha = (
+            int(st.session_state.get('jml_industri_makanan', 0)) +
+            int(st.session_state.get('jml_industri_alat_rt', 0)) +
+            int(st.session_state.get('jml_industri_material', 0)) +
+            int(st.session_state.get('jml_industri_alat_pertanian', 0)) +
+            int(st.session_state.get('jml_industri_kerajinan', 0)) +
+            int(st.session_state.get('jml_industri_logam', 0)) +
+            int(st.session_state.get('jml_industri_lainnya', 0))
+        )
+        
+        if total_usaha > 0:
+            st.info(f"📊 **Ringkasan:** Anda akan mengisi data untuk **{total_usaha} usaha** berdasarkan rekapitulasi di BLOK III")
+        else:
+            st.warning("⚠️ **Perhatian:** Total jumlah usaha adalah 0. Anda harus mengisi minimal 1 usaha di BLOK III")
+
 # Hubungkan ke Google Sheets
 worksheet = connect_to_gsheet()
 # Tambahkan setelah worksheet = connect_to_gsheet()
@@ -853,7 +957,7 @@ if st.session_state.page == 'form':
         
         with col1:
             provinsi = st.text_input("1.1 Provinsi", value="JAWA TENGAH", key="provinsi")
-            kabupaten = st.text_input("1.2 Kabupaten/Kota", value="TEGAL", key="kabupaten")
+            kabupaten = st.text_input("1.2 Kabupaten/Kota", value="KOTA TEGAL", key="kabupaten")
             kecamatan = st.text_input("1.3 Kecamatan", value="TEGAL TIMUR", key="kecamatan")
         
         with col2:
@@ -890,6 +994,10 @@ if st.session_state.page == 'form':
             jml_industri_lainnya = st.number_input("3.7 Jumlah Industri Lainnya", min_value=0, key="jml_industri_lainnya")
         
         st.subheader("BLOK IV. KETERANGAN USAHA")
+
+        # Tampilkan ringkasan data
+        show_data_summary()
+
         total_usaha = (
             int(st.session_state.jml_industri_makanan) +
             int(st.session_state.jml_industri_alat_rt) +
@@ -903,9 +1011,12 @@ if st.session_state.page == 'form':
         st.info(f"Jumlah Usaha yang akan didata: {total_usaha} (otomatis dihitung dari total BLOK III)")
 
         submitted = st.form_submit_button("Lanjut ke Data Usaha")
-        
+
         if submitted:
-            save_form_data()
+            success = save_form_data()
+            if success:
+                st.success("✅ Data valid! Melanjutkan ke pengisian data usaha...")
+                st.rerun()
 
 # Halaman Usaha
 elif st.session_state.page == 'usaha':
